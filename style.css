@@ -166,6 +166,22 @@ button { font: inherit; color: inherit; }
 .tile.selected { transform: translateY(-10px); }
 .tile.swap { transform: translateY(-10px) rotate(-6deg); outline-style: dashed; }
 
+/* Stacks: each layer sits a little higher, leaving the edge (and author colour) of the one below visible. */
+.stack { position: relative; display: block; width: 52px; height: 52px; }
+.stack .tile { position: absolute; left: 0; top: 0; }
+.stack .tile:nth-child(2) { top: -5px; }
+.stack .tile:nth-child(3) { top: -10px; }
+.stack .tile:not(:last-child) .digit,
+.stack .tile:not(:last-child) .pv { visibility: hidden; }
+
+.tile .hp { position: absolute; left: 6px; top: 6px; display: flex; gap: 2px; }
+.tile .hp i { width: 5px; height: 5px; border-radius: 50%; background: #9a8f7b; }
+.tile .hp i.by-p1 { background: var(--p1); }
+.tile .hp i.by-p2 { background: var(--p2); }
+
+.cell.open .stack .tile:last-child { outline: 1.5px dashed rgba(215, 155, 43, .85); outline-offset: 1px; }
+.cell.target .stack .tile:last-child { outline: 2px solid var(--amber); outline-offset: 2px; }
+
 .tile.back {
   background: repeating-linear-gradient(45deg, #c2b08a 0 6px, #b8a57d 6px 12px);
 }
@@ -545,6 +561,7 @@ button { font: inherit; color: inherit; }
 
 .mb {
   --edge: rgba(120, 95, 50, .3);
+  position: relative;
   width: 22px;
   height: 22px;
   display: inline-flex;
@@ -559,6 +576,19 @@ button { font: inherit; color: inherit; }
 .mb.by-p1 { --edge: var(--p1); }
 .mb.by-p2 { --edge: var(--p2); }
 .mb.empty { background: #ece6d8; box-shadow: none; }
+
+.mh {
+  position: absolute;
+  top: -6px;
+  right: -5px;
+  min-width: 12px;
+  height: 12px;
+  border-radius: 6px;
+  background: var(--ink);
+  color: var(--paper);
+  font: 600 8px/12px var(--sans);
+  text-align: center;
+}
 
 .stats {
   display: flex;

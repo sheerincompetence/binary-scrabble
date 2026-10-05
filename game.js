@@ -5,6 +5,7 @@
   const COLS = 8;
   const HAND_SIZE = 8;
   const PER_TURN = 4;
+  const MAX_STACK = 3;
   const PLACE_VALUES = [128, 64, 32, 16, 8, 4, 2, 1];
   const EXAMPLE_BITS = [0, 0, 1, 0, 1, 0, 1, 0];
   const NAMES = ['Player 1', 'Player 2'];
@@ -14,6 +15,7 @@
     geography: 'across',
     facing: 'p1',
     placement: 'line',
+    stacking: false,
     gravity: false,
     openHands: true,
     allowSwap: true,
@@ -81,6 +83,11 @@
       options: [['row', 'In one row'], ['line', 'One row or column'], ['free', 'Anywhere']],
     },
     {
+      key: 'stacking', label: 'Stacking',
+      options: [[false, 'Off'], [true, `Up to ${MAX_STACK} high`]],
+      note: s => s.stacking ? 'Place on top of any tile from an earlier turn. Only the top tile counts: cover a bit to change it, or match it to agree.' : '',
+    },
+    {
       key: 'gravity', label: 'Tiles slide to the bottom',
       options: [[false, 'Off'], [true, 'On']],
       note: s => s.gravity ? 'Connect-Four style. The word still reads top-down, so the last letter gets built first.' : '',
@@ -96,6 +103,7 @@
   const END_REASONS = {
     agreed: 'You both saw a word',
     full: 'The board is full',
+    capped: 'Every stack is at its cap',
     dry: 'The tiles ran out',
     stuck: 'Neither of you could move',
   };
@@ -150,7 +158,7 @@
     shuffle(bag);
 
     G = {
-      board: range(ROWS).map(() => Array(COLS).fill(null)),
+      board: range(ROWS).map(() => range(COLS).map(() => [])),
       bag,
       hands: [Array(HAND_SIZE).fill(null), Array(HAND_SIZE).fill(null)],
       current: 0,
@@ -162,7 +170,7 @@
       turn: 1,
       required: PER_TURN,
       passStreak: 0,
-      stats: { placed: 0, swaps: 0, passes: 0 },
+      stats: { placed: 0, swaps: 0, passes: 0, corrections: 0, confirmations: 0 },
       startedAt: Date.now(),
       endedAt: null,
       over: null,
@@ -176,7 +184,20 @@
   }
 
   const handCount = p => G.hands[p].filter(Boolean).length;
-  const emptyCount = () => G.board.flat().filter(x => !x).length;
+  const topAt = (r, c) => G.board[r][c][G.board[r][c].length - 1] || null;
+
+  // Can a tile go on this square at all (ignoring gravity and this turn's line)?
+  function hasRoom(r, c) {
+    const top = topAt(r, c);
+    if (!top) return true;
+    return settings.stacking && !top.pending && G.board[r][c].length < MAX_STACK;
+  }
+
+  function spotsLeft() {
+    let n = 0;
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (hasRoom(r, c)) n++;
+    return n;
+  }
 
   function refill(p) {
     const hand = G.hands[p];
@@ -186,14 +207,15 @@
   }
 
   function beginTurn() {
-    G.required = Math.min(PER_TURN, handCount(G.current), emptyCount());
+    G.required = Math.min(PER_TURN, handCount(G.current), spotsLeft());
   }
 
   // Where a tile aimed at (r, c) would actually land.
   function targetCell(r, c) {
-    if (!settings.gravity) return G.board[r][c] ? null : { r, c };
+    if (G.board[r][c].length) return hasRoom(r, c) ? { r, c } : null;
+    if (!settings.gravity) return { r, c };
     for (let rr = ROWS - 1; rr >= 0; rr--) {
-      if (!G.board[rr][c]) return { r: rr, c };
+      if (!G.board[rr][c].length) return { r: rr, c };
     }
     return null;
   }
@@ -231,9 +253,9 @@
   }
 
   function decodeRow(r) {
-    const row = G.board[r];
-    if (row.some(x => !x)) return null;
-    const value = row.reduce((acc, x) => acc * 2 + x.bit, 0);
+    const tops = range(COLS).map(c => topAt(r, c));
+    if (tops.some(x => !x)) return null;
+    const value = tops.reduce((acc, x) => acc * 2 + x.bit, 0);
     const letter = value >= 65 && value <= 90;
     let char = null;
     if (value > 32 && value < 127) char = String.fromCharCode(value);
@@ -283,24 +305,28 @@
 
   function onCell(r, c) {
     if (G.over || G.swapping) return;
-    const cell = G.board[r][c];
-    if (cell && cell.pending) { takeBack(r, c); return; }
+    const top = topAt(r, c);
+    if (top && top.pending) { takeBack(r, c); return; }
 
     const p = G.current;
     const slot = G.hands[p].findIndex(t => t && t.id === G.selected);
     if (slot < 0) {
-      if (!cell) notify('Pick a tile from your rack first.');
+      if (!top || settings.stacking) notify('Pick a tile from your rack first.');
       shake(cellSel(r, c));
       return;
     }
     const target = targetCell(r, c);
-    if (!target) { shake(cellSel(r, c)); return; }
+    if (!target) {
+      if (top && settings.stacking) notify(`Stacks go ${MAX_STACK} high.`);
+      shake(cellSel(r, c));
+      return;
+    }
     const verdict = placementAllowed(target.r, target.c);
     if (verdict !== true) { notify(verdict); shake(cellSel(r, c)); return; }
 
     const tile = G.hands[p][slot];
     G.hands[p][slot] = null;
-    G.board[target.r][target.c] = { bit: tile.bit, by: p, pending: true, tile, slot };
+    G.board[target.r][target.c].push({ bit: tile.bit, by: p, pending: true, tile, slot });
     G.pending.push({ r: target.r, c: target.c });
     G.selected = null;
     G.justPlaced = `${target.r},${target.c}`;
@@ -308,16 +334,16 @@
   }
 
   function takeBack(r, c) {
-    if (settings.gravity && r > 0 && G.board[r - 1][c]) {
+    const stack = G.board[r][c];
+    if (settings.gravity && stack.length === 1 && r > 0 && G.board[r - 1][c].length) {
       notify('Take the tile above it back first.');
       shake(cellSel(r, c));
       return;
     }
-    const cell = G.board[r][c];
+    const cell = stack.pop();
     const hand = G.hands[G.current];
     const slot = hand[cell.slot] ? hand.indexOf(null) : cell.slot;
     hand[slot] = cell.tile;
-    G.board[r][c] = null;
     G.pending = G.pending.filter(t => !(t.r === r && t.c === c));
     G.selected = null;
     render();
@@ -374,12 +400,22 @@
     render();
   }
 
+  function commitPending() {
+    G.pending.forEach(({ r, c }) => {
+      const stack = G.board[r][c];
+      const top = stack[stack.length - 1];
+      const below = stack[stack.length - 2];
+      if (below) below.bit === top.bit ? G.stats.confirmations++ : G.stats.corrections++;
+      top.pending = false;
+    });
+    G.stats.placed += G.pending.length;
+    G.pending = [];
+  }
+
   function endTurn(kind) {
     const p = G.current;
     if (kind === 'place') {
-      G.pending.forEach(({ r, c }) => { G.board[r][c].pending = false; });
-      G.stats.placed += G.pending.length;
-      G.pending = [];
+      commitPending();
       G.passStreak = 0;
       // A raised flag was a claim about the old board.
       G.wordFlags = [false, false];
@@ -396,7 +432,7 @@
     G.swapSel.clear();
     G.notice = null;
 
-    if (emptyCount() === 0) { endGame('full'); return; }
+    if (spotsLeft() === 0) { endGame(settings.stacking ? 'capped' : 'full'); return; }
     if (handCount(0) === 0 && handCount(1) === 0) { endGame('dry'); return; }
     if (G.passStreak >= 2) { endGame('stuck'); return; }
 
@@ -407,9 +443,7 @@
   }
 
   function endGame(reason) {
-    G.pending.forEach(({ r, c }) => { G.board[r][c].pending = false; });
-    G.stats.placed += G.pending.length;
-    G.pending = [];
+    commitPending();
     G.over = reason;
     G.endedAt = Date.now();
     G.selected = null;
@@ -453,7 +487,10 @@
     if (o.selected) cls.push('selected');
     if (o.swap) cls.push('swap');
     if (o.drop) cls.push('drop');
-    return `<span class="${cls.join(' ')}"><span class="digit">${bit}</span><span class="pv">${bit}</span></span>`;
+    const height = o.layers && o.layers.length > 1
+      ? `<span class="hp">${o.layers.map(by => `<i class="by-p${by + 1}"></i>`).join('')}</span>`
+      : '';
+    return `<span class="${cls.join(' ')}">${height}<span class="digit">${bit}</span><span class="pv">${bit}</span></span>`;
   }
 
   function renderBoard() {
@@ -461,10 +498,15 @@
     const cells = [];
     for (let r = 0; r < ROWS; r++) {
       for (let c = 0; c < COLS; c++) {
-        const cell = G.board[r][c];
-        const open = choosing && !cell && isLanding(r, c);
-        const inner = cell
-          ? tileHTML(cell.bit, { by: cell.by, pending: cell.pending, drop: G.justPlaced === `${r},${c}` })
+        const stack = G.board[r][c];
+        const open = choosing && isLanding(r, c);
+        const inner = stack.length
+          ? `<span class="stack h${stack.length}">${stack.map((t, i) => tileHTML(t.bit, {
+              by: t.by,
+              pending: t.pending,
+              drop: i === stack.length - 1 && G.justPlaced === `${r},${c}`,
+              layers: i === stack.length - 1 ? stack.map(s => s.by) : null,
+            })).join('')}</span>`
           : '';
         cells.push(`<button class="cell${open ? ' open' : ''}" data-action="cell" data-r="${r}" data-c="${c}" aria-label="Row ${r + 1}, column ${c + 1}">${inner}</button>`);
       }
@@ -617,6 +659,7 @@
       <h3>Each turn</h3>
       <ul>
         <li>Place 4 tiles from your rack.</li>
+        ${settings.stacking ? `<li>You may place on top of tiles from earlier turns, up to ${MAX_STACK} high. Only the top tile counts.</li>` : ''}
         <li>Draw back up to 8.</li>
         <li>You may swap tiles with the bag instead of placing.</li>
       </ul>
@@ -680,9 +723,12 @@
     const elapsed = formatDuration((G.endedAt || Date.now()) - G.startedAt);
 
     const rowHTML = rows.map((d, r) => {
-      const bits = G.board[r].map(cell =>
-        cell ? `<span class="mb by-p${cell.by + 1}">${cell.bit}</span>` : '<span class="mb empty"></span>'
-      ).join('');
+      const bits = G.board[r].map(stack => {
+        const top = stack[stack.length - 1];
+        if (!top) return '<span class="mb empty"></span>';
+        const h = stack.length > 1 ? `<span class="mh">${stack.length}</span>` : '';
+        return `<span class="mb by-p${top.by + 1}">${top.bit}${h}</span>`;
+      }).join('');
       const cls = d ? (d.letter ? 'letter' : 'other') : 'incomplete';
       const ch = d ? (d.letter ? d.char : (d.char ?? '□')) : '·';
       return `<tr class="${cls}">
@@ -707,6 +753,9 @@
         <span><b>${G.stats.placed}</b>tiles</span>
         <span><b>${G.stats.swaps}</b>swaps</span>
         <span><b>${G.stats.passes}</b>passes</span>
+        ${G.stats.corrections + G.stats.confirmations ? `
+          <span><b>${G.stats.corrections}</b>corrections</span>
+          <span><b>${G.stats.confirmations}</b>confirmations</span>` : ''}
       </div>
       <div class="sheet-actions">
         <button class="btn" data-action="close">View board</button>
