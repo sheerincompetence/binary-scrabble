@@ -85,7 +85,7 @@
     {
       key: 'stacking', label: 'Stacking',
       options: [[false, 'Off'], [true, `Up to ${MAX_STACK} high`]],
-      note: s => s.stacking ? 'Place on top of any tile from an earlier turn. Only the top tile counts: cover a bit to change it, or match it to agree.' : '',
+      note: s => s.stacking ? 'Place on top of any tile from an earlier turn. Only the top tile counts: cover a bit to change it, or match it to agree. Filling the last gaps in a row or column lets you stop with fewer than 4.' : '',
     },
     {
       key: 'gravity', label: 'Tiles slide to the bottom',
@@ -247,9 +247,24 @@
     return settings.allowSwap && !G.over && G.pending.length === 0 && G.bag.length > 0;
   }
 
+  // 'row' or 'column' if this turn's tiles just filled the last empty squares of one.
+  function completedLine() {
+    const p = G.pending;
+    if (!p.length) return null;
+    const lines = [];
+    if (p.every(t => t.r === p[0].r)) lines.push(['row', range(COLS).map(c => [p[0].r, c])]);
+    if (p.every(t => t.c === p[0].c)) lines.push(['column', range(ROWS).map(r => [r, p[0].c])]);
+    const done = lines.find(([, cells]) =>
+      cells.every(([r, c]) => G.board[r][c].length) &&
+      cells.some(([r, c]) => G.board[r][c].length === 1 && G.board[r][c][0].pending)
+    );
+    return done ? done[0] : null;
+  }
+
   function doneState() {
     const n = G.pending.length;
-    return { ready: n >= G.required || !canPlaceMore(), label: n === 0 ? 'Pass' : 'Done' };
+    const early = settings.stacking && n > 0 && n < G.required ? completedLine() : null;
+    return { ready: n >= G.required || !canPlaceMore() || !!early, early, label: n === 0 ? 'Pass' : 'Done' };
   }
 
   function decodeRow(r) {
@@ -575,7 +590,10 @@
       else if (G.swapping) status = '<span class="st-status">Pick tiles to swap</span>';
       else {
         const pips = range(G.required).map(i => `<i class="pip${i < G.pending.length ? ' on' : ''}"></i>`).join('');
-        status = `<span class="st-status">Your turn <span class="pips">${pips}</span></span>`;
+        const { early } = doneState();
+        status = early
+          ? `<span class="st-status"><span class="pips">${pips}</span> ${early} filled · you may stop</span>`
+          : `<span class="st-status">Your turn <span class="pips">${pips}</span></span>`;
       }
     }
 
@@ -659,7 +677,8 @@
       <h3>Each turn</h3>
       <ul>
         <li>Place 4 tiles from your rack.</li>
-        ${settings.stacking ? `<li>You may place on top of tiles from earlier turns, up to ${MAX_STACK} high. Only the top tile counts.</li>` : ''}
+        ${settings.stacking ? `<li>You may place on top of tiles from earlier turns, up to ${MAX_STACK} high. Only the top tile counts.</li>
+        <li>If your tiles fill the last gaps in a row or column, you may stop there, even with fewer than 4.</li>` : ''}
         <li>Draw back up to 8.</li>
         <li>You may swap tiles with the bag instead of placing.</li>
       </ul>
