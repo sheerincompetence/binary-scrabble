@@ -80,6 +80,7 @@
   const chrome = document.getElementById('chrome');
 
   let settings = loadSettings();
+  const ui = { refTab: ['ascii', 'ascii'] };
   let G = null;
   let overlayKind = null;
 
@@ -212,7 +213,7 @@
 
   function canEndTurn() {
     const n = G.pending.length;
-    if (n === 0) return G.claims[G.current];
+    if (n === 0) return false;
     if (n >= G.required || !canPlaceMore()) return true;
     return settings.placement === 'line' && completedLine();
   }
@@ -221,10 +222,7 @@
     return settings.allowSwap && !G.over && G.pending.length === 0 && G.bag.length > 0;
   }
 
-  // A claim stands until the other player starts changing the board.
-  function claimLive(p) {
-    return G.claims[p] && (p === G.current || G.pending.length === 0);
-  }
+  const claimLive = p => G.claims[p];
 
   function decodeRow(r) {
     const row = G.board[r];
@@ -358,7 +356,7 @@
   }
 
   function toggleClaim(p) {
-    if (G.over || p !== G.current) return;
+    if (G.over) return;
     if (claimLive(1 - p)) { endGame('agreed'); return; }
     G.claims[p] = !G.claims[p];
     render();
@@ -479,8 +477,9 @@
   }
 
   function flagButton(p) {
-    const usable = !G.over && G.current === p;
-    return `<button class="flag${claimLive(p) ? ' on' : ''}" data-action="flag" data-p="${p}" ${usable ? '' : 'disabled'}>I see a word</button>`;
+    const on = claimLive(p);
+    const awaitPartner = !on && claimLive(1 - p);
+    return `<button class="flag${on ? ' on' : ''}${awaitPartner ? ' await' : ''}" data-action="flag" data-p="${p}" ${G.over ? 'disabled' : ''}>I see a word</button>`;
   }
 
   function rackGroup(p, active) {
@@ -523,38 +522,42 @@
     </div>`;
   }
 
-  function asciiCard() {
+  function refCard(p) {
+    const tab = ui.refTab[p] || 'ascii';
     const entries = [];
     for (let v = 65; v <= 90; v++) {
       const bin = settings.refBinary ? `<i>${v.toString(2).padStart(8, '0')}</i>` : '';
       entries.push(`<span class="e"><b>${v}</b>${bin}<em>${String.fromCharCode(v)}</em></span>`);
     }
-    return `<div class="card card-ascii${settings.refBinary ? ' with-bin' : ''}">
-      <h4>ASCII</h4>
-      <div class="ascii-grid">${entries.join('')}</div>
-    </div>`;
-  }
-
-  function binaryCard() {
     const values = PLACE_VALUES.map((v, i) => `<span class="v${EXAMPLE_BITS[i] ? ' hit' : ''}">${v}</span>`).join('');
     const bits = EXAMPLE_BITS.map(b => `<span class="b${b ? ' hit' : ''}">${b}</span>`).join('');
-    return `<div class="card card-binary">
-      <h4>Binary</h4>
-      <p>Read a row left to right.<br>Each column has a value.</p>
-      <div class="bin-eg">${values}${bits}</div>
-      <p>Add the values above every 1.</p>
-      <div class="sum">32 + 8 + 2 = 42</div>
+    const tabBtn = (id, label) =>
+      `<button class="tab${tab === id ? ' on' : ''}" data-action="reftab" data-p="${p}" data-tab="${id}">${label}</button>`;
+    return `<div class="card-ref${settings.refBinary ? ' with-bin' : ''}">
+      <aside class="ref-rail"><span class="ref-title">Reference</span></aside>
+      <div class="ref-body">
+        <div class="panels">
+          <div class="panel ascii${tab === 'ascii' ? ' on' : ''}">
+            <div class="ascii-grid">${entries.join('')}</div>
+          </div>
+          <div class="panel binary${tab === 'binary' ? ' on' : ''}">
+            <p>Read a row left to right.<br>Each column has a value.</p>
+            <div class="bin-eg">${values}${bits}</div>
+            <p>Add the values above every 1.</p>
+            <div class="sum">32 + 8 + 2 = 42</div>
+          </div>
+        </div>
+        <div class="ref-modes">${tabBtn('ascii', 'ASCII')}${tabBtn('binary', 'Binary')}</div>
+      </div>
     </div>`;
   }
 
-  // A row station keeps the rack central with a card either side; a column station stacks the cards above it.
+  // A row station is the rack, then the reference sheet. A column station stacks the sheet above the rack.
   function renderStation(p, shape) {
     const active = !G.over && G.current === p;
     const rack = rackGroup(p, active);
-    const inner = shape === 'row'
-      ? asciiCard() + rack + binaryCard()
-      : `<div class="cards">${asciiCard()}${binaryCard()}</div>${rack}`;
-    return `<section class="station ${shape} p${p + 1}${active ? ' active' : ''}">${inner}</section>`;
+    const card = refCard(p);
+    return `<section class="station ${shape} p${p + 1}${active ? ' active' : ''}">${shape === 'row' ? rack + card : card + rack}</section>`;
   }
 
   function renderStrip(p) {
@@ -671,7 +674,7 @@
       if (!sizes.has(k)) {
         measure.innerHTML = pieceHTML(key, shape);
         const el = measure.firstElementChild;
-        const rack = el.querySelector('.rack-group');
+        const rack = el.querySelector('.rack');
         const anchor = rack ? rack.offsetLeft - el.offsetLeft + rack.offsetWidth / 2 : el.offsetWidth / 2;
         sizes.set(k, { w: el.offsetWidth, h: el.offsetHeight, anchor });
         measure.innerHTML = '';
@@ -753,8 +756,8 @@
       </ul>
 
       <h3>Ending</h3>
-      <p>If you think there’s a word on the board, press <b>I see a word</b> on your turn. You may then end your turn without placing.
-      If your partner presses theirs too, the game ends and the board is decoded. If they carry on instead, your claim drops.</p>
+      <p>If you think there’s a word on the board, press <b>I see a word</b> at any time — you don’t wait for a turn.
+      Your partner’s button then lights up. If they press theirs too, the game ends and the board is decoded. If they finish a turn instead, your claim drops.</p>
 
       <p class="hush-line">No talking.</p>
 
@@ -861,6 +864,7 @@
       case 'swap-cancel': cancelSwap(); break;
       case 'swap-confirm': confirmSwap(); break;
       case 'flag': toggleClaim(+d.p); break;
+      case 'reftab': ui.refTab[+d.p] = d.tab; render(); break;
       case 'rules': showRules(); break;
       case 'settings': showSettings(); break;
       case 'record': if (G && G.over) showRecord(); break;

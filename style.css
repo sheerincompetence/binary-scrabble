@@ -205,7 +205,7 @@ button { font: inherit; color: inherit; touch-action: manipulation; }
 .station.p2 { --pc: var(--p2); }
 
 .station.column { flex-direction: column; gap: 16px; width: 490px; }
-.station.row    { flex-direction: row; align-items: flex-end; gap: 24px; }
+.station.row    { flex-direction: row; align-items: center; gap: 20px; }
 
 .rack-group {
   width: 490px;
@@ -267,6 +267,7 @@ button { font: inherit; color: inherit; touch-action: manipulation; }
 }
 
 .flag.on { background: var(--pc); color: #fff; }
+.flag.await { box-shadow: 0 0 0 5px color-mix(in srgb, var(--pc) 22%, transparent); }
 .flag:disabled { cursor: default; }
 .flag:disabled:not(.on) { opacity: .35; }
 .flag.off { visibility: hidden; }
@@ -323,56 +324,109 @@ button { font: inherit; color: inherit; touch-action: manipulation; }
 .btn.primary { background: var(--ink); color: var(--paper); }
 .btn:disabled { opacity: .28; cursor: default; }
 
-/* ---------- reference cards ---------- */
+/* ---------- reference card ---------- */
 
-.cards {
+.card-ref {
+  --edge: rgba(120, 95, 50, .28);
   width: 490px;
   display: flex;
-  flex-wrap: wrap;
   align-items: stretch;
-  gap: 10px;
-}
-
-.card {
-  padding: 14px 18px 16px;
-  background: var(--paper);
-  border-radius: 4px;
-  box-shadow: 0 1px 0 rgba(0, 0, 0, .05), 0 8px 16px rgba(60, 40, 10, .14);
+  border-radius: 6px;
+  background: linear-gradient(160deg, #f9f2e0 0%, #eee2c5 100%);
   color: #2b2925;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .85),
+    inset 0 -4px 0 var(--edge),
+    0 2px 0 rgba(0, 0, 0, .2),
+    0 8px 14px rgba(40, 30, 10, .22);
 }
 
-.card h4 {
-  margin: 0 0 10px;
-  padding-bottom: 9px;
-  border-bottom: 1px solid var(--rule);
-  font: 600 12px/1 var(--sans);
-  letter-spacing: .26em;
-  text-transform: uppercase;
-  color: #8a8273;
+.station.row .card-ref { width: 320px; }
+
+.ref-rail {
+  width: 32px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px 0;
+  border-radius: 6px 0 0 6px;
+  background: linear-gradient(#cdb791, #b39a73);
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, .28),
+    inset -1px 0 0 rgba(80, 55, 25, .18);
 }
+
+.ref-title {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font: 600 11px/1 var(--sans);
+  letter-spacing: .32em;
+  text-transform: uppercase;
+  color: #4a4034;
+}
+
+.ref-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.panels {
+  flex: 1;
+  display: grid;
+  padding: 12px 14px 6px;
+  min-width: 0;
+}
+
+.ref-modes {
+  align-self: flex-end;
+  display: flex;
+  margin: 2px 0 0;
+  border-top: 1.5px solid rgba(120, 95, 50, .28);
+  border-left: 1.5px solid rgba(120, 95, 50, .28);
+  border-radius: 7px 0 6px 0;
+}
+
+.tab {
+  all: unset;
+  box-sizing: border-box;
+  padding: 7px 11px;
+  font: 600 10px/1 var(--sans);
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: #b3aa98;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.tab + .tab { border-left: 1.5px solid rgba(120, 95, 50, .22); }
+.tab.on { color: #4a4034; background: rgba(80, 55, 25, .07); }
+
+.panels > * { grid-area: 1 / 1; }
+
+.panel { min-height: 0; }
+.panel:not(.on) { visibility: hidden; }
 
 .ascii-grid {
   display: grid;
   grid-auto-flow: column;
   grid-template-rows: repeat(9, auto);
+  align-content: space-between;
   column-gap: 22px;
-  row-gap: 4px;
-  font: 20px/1.2 var(--mono);
+  font: 15px/1.2 var(--mono);
 }
 
-.station.row .ascii-grid { grid-template-rows: repeat(4, auto); column-gap: 18px; row-gap: 6px; }
-
-.ascii-grid .e { display: flex; gap: 9px; }
+.ascii-grid .e { display: flex; gap: 8px; }
 .ascii-grid b  { font-weight: 400; color: #8a8273; }
 .ascii-grid i  { font-style: normal; color: #4a463e; }
 .ascii-grid em { font-style: normal; font-weight: 700; }
 
-.card-ascii.with-bin .ascii-grid { grid-template-rows: repeat(9, auto); column-gap: 16px; row-gap: 3px; font-size: 15px; }
-.card-ascii.with-bin .ascii-grid .e { gap: 7px; }
+.card-ref.with-bin .ascii-grid { column-gap: 14px; font-size: 13px; }
+.card-ref.with-bin .ascii-grid .e { gap: 7px; }
 
-.card-binary { flex: 1; min-width: 250px; }
-.station.row .card-binary { flex: none; width: 274px; }
-.card-binary p { margin: 0; font: 14px/1.4 var(--sans); color: #4a463e; }
+.panel.binary p { margin: 0; font: 14px/1.4 var(--sans); color: #4a463e; }
 
 .bin-eg {
   display: grid;
@@ -450,13 +504,16 @@ button { font: inherit; color: inherit; touch-action: manipulation; }
 
 #hush {
   position: fixed;
-  left: 16px;
-  bottom: 14px;
-  font: 600 11px/1 var(--sans);
-  letter-spacing: .4em;
-  text-transform: uppercase;
-  color: rgba(60, 50, 35, .45);
+  left: 14px;
+  bottom: 12px;
   pointer-events: none;
+}
+
+#hush img {
+  display: block;
+  width: 36px;
+  height: 36px;
+  opacity: .55;
 }
 
 /* ---------- overlay sheets ---------- */
