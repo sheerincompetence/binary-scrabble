@@ -64,6 +64,7 @@ button { font: inherit; color: inherit; touch-action: manipulation; }
   position: relative;
   width: 520px;
   height: 520px;
+  overflow: visible;
   background: var(--board);
   border-radius: 12px;
   box-shadow:
@@ -80,11 +81,13 @@ button { font: inherit; color: inherit; touch-action: manipulation; }
   grid-template-columns: repeat(8, 52px);
   grid-template-rows: repeat(8, 52px);
   gap: 6px;
+  overflow: visible;
 }
 
 .cell {
   all: unset;
   position: relative;
+  overflow: visible;
   width: 52px;
   height: 52px;
   border-radius: 6px;
@@ -168,7 +171,6 @@ button { font: inherit; color: inherit; touch-action: manipulation; }
 .tile.pending,
 .tile.selected { outline: 2.5px solid var(--amber); outline-offset: 2px; }
 .tile.selected { transform: translateY(-10px); }
-.tile.swap { transform: translateY(-10px) rotate(-6deg); outline: 2.5px dashed var(--amber); outline-offset: 2px; }
 
 .tile.fresh::after {
   content: '';
@@ -188,6 +190,23 @@ button { font: inherit; color: inherit; touch-action: manipulation; }
 @keyframes drop {
   from { transform: scale(1.3); opacity: 0; }
   to   { transform: none; opacity: 1; }
+}
+
+.tile.flyer {
+  position: absolute;
+  left: calc(var(--col) * 58px);
+  top: calc(var(--row) * 58px);
+  z-index: 4;
+  pointer-events: none;
+}
+
+.tile.slide {
+  animation: slide-down var(--fall-ms, 400ms) cubic-bezier(.22, .82, .2, 1) both;
+}
+
+@keyframes slide-down {
+  from { transform: translateY(calc(-1 * var(--fall))); }
+  to   { transform: none; }
 }
 
 .shake { animation: shake .32s ease; }
@@ -423,9 +442,6 @@ button { font: inherit; color: inherit; touch-action: manipulation; }
 .ascii-grid i  { font-style: normal; color: #4a463e; }
 .ascii-grid em { font-style: normal; font-weight: 700; }
 
-.card-ref.with-bin .ascii-grid { column-gap: 14px; font-size: 13px; }
-.card-ref.with-bin .ascii-grid .e { gap: 7px; }
-
 .panel.binary p { margin: 0; font: 14px/1.4 var(--sans); color: #4a463e; }
 
 .bin-eg {
@@ -571,6 +587,8 @@ button { font: inherit; color: inherit; touch-action: manipulation; }
 .sheet ul { padding-left: 18px; margin: 6px 0; }
 .sheet .sub { margin-top: 0; color: var(--ink-soft); font-size: 14px; }
 .sheet .hush-line { font: 600 13px/1 var(--sans); letter-spacing: .4em; text-transform: uppercase; margin: 22px 0 4px; }
+.sheet .byline { margin: 28px 0 0; text-align: center; font: 500 13px/1.4 var(--sans); color: var(--ink-soft); }
+.sheet .byline a { color: inherit; text-underline-offset: 3px; }
 .sheet kbd { font: 12px var(--mono); padding: 1px 5px; border: 1px solid #d6cdb9; border-radius: 4px; background: #fff; }
 
 .sheet-actions {
@@ -591,6 +609,7 @@ button { font: inherit; color: inherit; touch-action: manipulation; }
 
 .set-label { font-size: 14px; }
 .set-note { margin-top: 3px; font-size: 12.5px; line-height: 1.4; color: var(--ink-soft); max-width: 270px; }
+.set-note.warn { color: #8a5a20; }
 
 .pills { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
 

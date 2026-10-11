@@ -21,8 +21,6 @@
     placement: 'line',
     gravity: false,
     openHands: true,
-    allowSwap: true,
-    refBinary: false,
     boardValues: false,
     reveal: false,
     zeros: 60,
@@ -61,9 +59,7 @@
       note: s => s.gravity ? 'Connect-Four style. The word still reads top-down, so the last letter gets built first.' : '',
     },
     { key: 'openHands', label: 'Racks', options: [[true, 'Open'], [false, 'Hidden']] },
-    { key: 'allowSwap', label: 'Swap tiles instead of placing', options: [[true, 'Allowed'], [false, 'No']] },
     { section: 'Help' },
-    { key: 'refBinary', label: 'ASCII card shows', options: [[false, 'Decimal'], [true, 'Decimal + binary']] },
     { key: 'boardValues', label: 'Column values on board', options: [[false, 'Hidden'], [true, 'Shown']] },
     { key: 'reveal', label: 'Decode rows on board', options: [[false, 'Off'], [true, 'On (cheat)']] },
   ];
@@ -132,15 +128,14 @@
       current: 0,
       pending: [],
       selected: null,
-      swapping: false,
-      swapSel: new Set(),
       claims: [false, false],
       lastMove: null,
       lastShown: true,
       lastSince: -Infinity,
       turn: 1,
       required: PER_TURN,
-      stats: { placed: 0, swaps: 0 },
+      stats: { placed: 0 },
+      bagSpec: { zeros: settings.zeros, ones: settings.ones },
       startedAt: Date.now(),
       endedAt: null,
       over: null,
@@ -218,10 +213,6 @@
     return settings.placement === 'line' && completedLine();
   }
 
-  function canSwap() {
-    return settings.allowSwap && !G.over && G.pending.length === 0 && G.bag.length > 0;
-  }
-
   const claimLive = p => G.claims[p];
 
   function decodeRow(r) {
@@ -260,16 +251,12 @@
   function onTile(p, id) {
     if (G.over) return;
     if (p !== G.current) { shake(`.slot[data-id="${id}"]`); return; }
-    if (G.swapping) {
-      G.swapSel.has(id) ? G.swapSel.delete(id) : G.swapSel.add(id);
-    } else {
-      G.selected = G.selected === id ? null : id;
-    }
+    G.selected = G.selected === id ? null : id;
     render();
   }
 
   function onCell(r, c) {
-    if (G.over || G.swapping) return;
+    if (G.over) return;
     const cell = G.board[r][c];
     if (cell && cell.pending) { takeBack(r, c); return; }
 
@@ -289,7 +276,7 @@
     G.board[target.r][target.c] = { bit: tile.bit, by: p, pending: true, tile, slot };
     G.pending.push({ r: target.r, c: target.c });
     G.selected = null;
-    G.justPlaced = `${target.r},${target.c}`;
+    G.justPlaced = { r: target.r, c: target.c, fall: settings.gravity ? target.r : 0 };
     render();
   }
 
@@ -318,41 +305,11 @@
   }
 
   function done() {
-    if (G.over || G.swapping) return;
+    if (G.over) return;
     if (!canEndTurn()) { shake('.station.active .rack'); return; }
     const cells = G.pending.map(({ r, c }) => `${r},${c}`);
     commitPending();
     finishTurn(cells, refill(G.current));
-  }
-
-  function startSwap() {
-    if (!canSwap()) return;
-    G.swapping = true;
-    G.selected = null;
-    G.swapSel.clear();
-    render();
-  }
-
-  function cancelSwap() {
-    G.swapping = false;
-    G.swapSel.clear();
-    render();
-  }
-
-  function confirmSwap() {
-    const p = G.current;
-    const hand = G.hands[p];
-    const n = hand.filter(t => t && G.swapSel.has(t.id)).length;
-    if (!n || n > G.bag.length) return;
-    const out = [];
-    hand.forEach((t, i) => {
-      if (t && G.swapSel.has(t.id)) { out.push(t); hand[i] = null; }
-    });
-    const drawn = refill(p);
-    G.bag.push(...out);
-    shuffle(G.bag);
-    G.stats.swaps++;
-    finishTurn([], drawn);
   }
 
   function toggleClaim(p) {
@@ -370,8 +327,6 @@
     G.lastShown = true;
     G.lastSince = -Infinity;
     G.selected = null;
-    G.swapping = false;
-    G.swapSel.clear();
 
     if (emptyCount() === 0) { endGame('full'); return; }
     let next = 1 - p;
@@ -390,13 +345,12 @@
     G.over = reason;
     G.endedAt = Date.now();
     G.selected = null;
-    G.swapping = false;
     render();
     showRecord();
   }
 
   function selectBit(bit) {
-    if (G.over || G.swapping) return;
+    if (G.over) return;
     const hand = G.hands[G.current];
     const idx = hand.map((t, i) => (t && t.bit === bit ? i : -1)).filter(i => i >= 0);
     if (!idx.length) return;
@@ -412,9 +366,20 @@
     if (o.back) return '<span class="tile back"></span>';
     const cls = ['tile'];
     if (o.by != null) cls.push(`by-p${o.by + 1}`);
-    for (const flag of ['pending', 'selected', 'swap', 'drop', 'last', 'fresh']) if (o[flag]) cls.push(flag);
+    for (const flag of ['pending', 'selected', 'drop', 'slide', 'last', 'fresh']) if (o[flag]) cls.push(flag);
     if (o.fade) cls.push(o.fade);
-    const style = o.delay ? ` style="animation-delay:${Math.round(o.delay)}ms"` : '';
+    const styles = [];
+    if (o.delay) styles.push(`animation-delay:${Math.round(o.delay)}ms`);
+    if (o.flyer) {
+      cls.push('flyer');
+      styles.push(`--col:${o.col}`);
+      styles.push(`--row:${o.row}`);
+    }
+    if (o.fall) {
+      styles.push(`--fall:${o.fall * 58}px`);
+      styles.push(`--fall-ms:${220 + o.fall * 90}ms`);
+    }
+    const style = styles.length ? ` style="${styles.join(';')}"` : '';
     return `<span class="${cls.join(' ')}"${style}><span class="digit">${bit}</span><span class="pv">${bit}</span></span>`;
   }
 
@@ -434,25 +399,45 @@
   }
 
   function renderBoard() {
-    const choosing = !G.over && !G.swapping && G.selected != null;
+    const choosing = !G.over && G.selected != null;
     const last = G.lastMove ? G.lastMove.cells : null;
     const look = last ? lastMoveLook() : null;
+    const falling = G.justPlaced && G.justPlaced.fall;
     const cells = [];
     for (let r = 0; r < ROWS; r++) {
       for (let c = 0; c < COLS; c++) {
         const cell = G.board[r][c];
         const key = `${r},${c}`;
-        const open = choosing && isLanding(r, c);
-        const inner = cell
+        const land = targetCell(r, c);
+        const open = choosing && (settings.gravity
+          ? !cell && !!land && placementAllowed(land.r, land.c)
+          : isLanding(r, c));
+        const placed = G.justPlaced && G.justPlaced.r === r && G.justPlaced.c === c;
+        const inner = cell && !(placed && falling)
           ? tileHTML(cell.bit, {
               by: cell.by,
               pending: cell.pending,
-              drop: G.justPlaced === key,
+              drop: placed && !falling,
               ...(!cell.pending && look && last.has(key) ? look : {}),
             })
           : '';
         cells.push(`<button class="cell${open ? ' open' : ''}" data-action="cell" data-r="${r}" data-c="${c}" aria-label="Row ${r + 1}, column ${c + 1}">${inner}</button>`);
       }
+    }
+
+    let flyer = '';
+    if (falling) {
+      const { r, c, fall } = G.justPlaced;
+      const cell = G.board[r][c];
+      flyer = tileHTML(cell.bit, {
+        by: cell.by,
+        pending: cell.pending,
+        slide: true,
+        flyer: true,
+        fall,
+        col: c,
+        row: r,
+      });
     }
 
     const top = settings.boardValues
@@ -470,7 +455,7 @@
     return `<div class="board">
       ${top}
       <div class="edge rows">${range(ROWS).map(r => `<span>${r + 1}</span>`).join('')}</div>
-      <div class="grid">${cells.join('')}</div>
+      <div class="grid">${cells.join('')}${flyer}</div>
       ${decode}
       <div class="board-foot"><span>Turn ${G.turn}</span><span>Bag ${G.bag.length}</span></div>
     </div>`;
@@ -488,11 +473,10 @@
 
     const slots = G.hands[p].map(t => {
       if (!t) return '<span class="slot empty"></span>';
-      const sel = active && (G.swapping ? G.swapSel.has(t.id) : G.selected === t.id);
+      const sel = active && G.selected === t.id;
       const tile = tileHTML(t.bit, {
         back: hidden,
-        selected: sel && !G.swapping,
-        swap: sel && G.swapping,
+        selected: sel,
         fresh: !!fresh && fresh.has(t.id),
       });
       return `<button class="slot" data-action="tile" data-p="${p}" data-id="${t.id}">${tile}</button>`;
@@ -500,16 +484,10 @@
 
     const status = G.over ? '' : active ? 'Your turn' : `${NAMES[G.current]} turn`;
 
-    let actions = '';
-    if (active && G.swapping) {
-      const n = G.swapSel.size;
-      actions = `<button class="btn" data-action="swap-cancel">Cancel</button>
-        <button class="btn primary" data-action="swap-confirm" ${n && n <= G.bag.length ? '' : 'disabled'}>Swap ${n || ''}</button>`;
-    } else if (active) {
-      actions = `<button class="btn" data-action="undo" ${G.pending.length ? '' : 'disabled'}>Undo</button>
-        ${settings.allowSwap ? `<button class="btn" data-action="swap" ${canSwap() ? '' : 'disabled'}>Swap</button>` : ''}
-        <button class="btn primary" data-action="done" ${canEndTurn() ? '' : 'disabled'}>Done</button>`;
-    }
+    const actions = active
+      ? `<button class="btn" data-action="undo" ${G.pending.length ? '' : 'disabled'}>Undo</button>
+        <button class="btn primary" data-action="done" ${canEndTurn() ? '' : 'disabled'}>Done</button>`
+      : '';
 
     return `<div class="rack-group">
       <header class="st-head">
@@ -526,14 +504,13 @@
     const tab = ui.refTab[p] || 'ascii';
     const entries = [];
     for (let v = 65; v <= 90; v++) {
-      const bin = settings.refBinary ? `<i>${v.toString(2).padStart(8, '0')}</i>` : '';
-      entries.push(`<span class="e"><b>${v}</b>${bin}<em>${String.fromCharCode(v)}</em></span>`);
+      entries.push(`<span class="e"><b>${v}</b><em>${String.fromCharCode(v)}</em></span>`);
     }
     const values = PLACE_VALUES.map((v, i) => `<span class="v${EXAMPLE_BITS[i] ? ' hit' : ''}">${v}</span>`).join('');
     const bits = EXAMPLE_BITS.map(b => `<span class="b${b ? ' hit' : ''}">${b}</span>`).join('');
     const tabBtn = (id, label) =>
       `<button class="tab${tab === id ? ' on' : ''}" data-action="reftab" data-p="${p}" data-tab="${id}">${label}</button>`;
-    return `<div class="card-ref${settings.refBinary ? ' with-bin' : ''}">
+    return `<div class="card-ref">
       <aside class="ref-rail"><span class="ref-title">Reference</span></aside>
       <div class="ref-body">
         <div class="panels">
@@ -752,7 +729,6 @@
       <ul>
         <li>Place 4 tiles from your rack, then draw back up to 8.</li>
         ${settings.placement === 'line' ? '<li>If your tiles fill the last gap in a row or column, you may stop there.</li>' : ''}
-        ${settings.allowSwap ? '<li>Or swap tiles with the bag instead of placing.</li>' : ''}
       </ul>
 
       <h3>Ending</h3>
@@ -769,7 +745,8 @@
       <div class="sheet-actions">
         <button class="btn" data-action="settings">Settings</button>
         <button class="btn primary" data-action="close">${first ? 'Begin' : 'Back'}</button>
-      </div>`);
+      </div>
+      <p class="byline">An art-game by <a href="https://andrewsheerin.art" target="_blank" rel="noopener">Andrew Sheerin</a></p>`);
   }
 
   function showSettings() {
@@ -785,10 +762,12 @@
     }).join('');
 
     const total = settings.zeros + settings.ones;
-    const bag = `<h3>Bag · next game</h3>
+    const bagChanged = G && !G.over && (settings.zeros !== G.bagSpec.zeros || settings.ones !== G.bagSpec.ones);
+    const bag = `<h3>Bag</h3>
       <div class="set-row">
         <div class="set-label">Tiles in the bag
           <div class="set-note">Capital letters are about 59% zeros. ${total} tiles total; the board holds 64.</div>
+          ${bagChanged ? '<div class="set-note warn">This takes effect from the next game.</div>' : ''}
         </div>
         <div class="num-group">
           0s <input class="num" type="number" min="0" max="300" data-num="zeros" value="${settings.zeros}">
@@ -838,7 +817,6 @@
       <div class="stats">
         <span><b>${G.turn}</b>turns</span>
         <span><b>${G.stats.placed}</b>tiles</span>
-        <span><b>${G.stats.swaps}</b>swaps</span>
       </div>
       <div class="sheet-actions">
         <button class="btn" data-action="close">View board</button>
@@ -860,9 +838,6 @@
       case 'cell': onCell(+d.r, +d.c); break;
       case 'undo': undo(); break;
       case 'done': done(); break;
-      case 'swap': startSwap(); break;
-      case 'swap-cancel': cancelSwap(); break;
-      case 'swap-confirm': confirmSwap(); break;
       case 'flag': toggleClaim(+d.p); break;
       case 'reftab': ui.refTab[+d.p] = d.tab; render(); break;
       case 'rules': showRules(); break;
@@ -891,7 +866,7 @@
   table.addEventListener('pointerover', e => {
     table.querySelectorAll('.cell.target').forEach(el => el.classList.remove('target'));
     const cellEl = e.target.closest('.cell');
-    if (!cellEl || !G || G.over || G.swapping || G.selected == null) return;
+    if (!cellEl || !G || G.over || G.selected == null) return;
     const t = targetCell(+cellEl.dataset.r, +cellEl.dataset.c);
     if (!t || !placementAllowed(t.r, t.c)) return;
     table.querySelector(cellSel(t.r, t.c))?.classList.add('target');
@@ -910,7 +885,7 @@
     if (e.key === '0' || e.key === '1') selectBit(+e.key);
     else if (e.key === 'Enter') done();
     else if (e.key === 'Backspace') { e.preventDefault(); undo(); }
-    else if (e.key === 'Escape') { G.selected = null; G.swapping = false; G.swapSel.clear(); render(); }
+    else if (e.key === 'Escape') { G.selected = null; render(); }
   });
 
   let resizeFrame = 0;
