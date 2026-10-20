@@ -94,6 +94,7 @@
   const ui = { refTab: ['ascii', 'ascii'] };
   let G = null;
   let overlayKind = null;
+  let awaitingStart = true;
 
   // ---------- utilities ----------
 
@@ -1196,13 +1197,44 @@
     overlay.dataset.player = p + 1;
   }
 
+  function startAs(partner) {
+    settings.partner = partner;
+    if (partner === 'machine') settings.gravity = false;
+    saveSettings();
+    awaitingStart = false;
+    closeOverlay();
+    newGame();
+  }
+
   function showRules(first = false) {
-    const handover = settings.geography === 'handover' && !isMachine();
+    const machine = isMachine();
+    const handover = settings.geography === 'handover' && !machine;
+    const intro = first
+      ? 'A collaborative game for two people, or one person and a machine. Nobody speaks.'
+      : machine
+        ? 'A collaborative game for one person and a machine. Neither of you speaks.'
+        : 'A collaborative game for two people who may not speak.';
+    const ending = first
+      ? 'If your partner also sees a word, the game ends and the board is decoded. If they take a turn instead, your claim drops.'
+      : machine
+        ? 'If the machine also sees a word, the game ends and the board is decoded. If it takes a turn instead, your claim drops.'
+        : 'Your partner’s button then lights up. If they press theirs too, the game ends and the board is decoded. If they finish a turn instead, your claim drops.';
+    const actions = first
+      ? `<div class="sheet-actions start">
+          <button class="btn" data-action="settings">Settings</button>
+          <div class="sheet-start">
+            <button class="btn${machine ? '' : ' primary'}" data-action="start" data-partner="human">Two players</button>
+            <button class="btn${machine ? ' primary' : ''}" data-action="start" data-partner="machine">One player</button>
+          </div>
+        </div>`
+      : `<div class="sheet-actions">
+          <button class="btn" data-action="settings">Settings</button>
+          <button class="btn primary" data-action="close">Back</button>
+        </div>`;
+
     openOverlay('rules', `
       <h1>Binary Scrabble</h1>
-      <p class="sub">${isMachine()
-        ? 'A collaborative game for one person and a machine. Neither of you speaks.'
-        : 'A collaborative game for two people who may not speak.'}</p>
+      <p class="sub">${intro}</p>
 
       <h3>The goal</h3>
       <p>Together, spell any word, reading top to bottom.
@@ -1216,9 +1248,7 @@
 
       <h3>Ending</h3>
       <p>If you think there’s a word anywhere on the board, press <b>I see a word</b> at any time — you don’t wait for a turn.
-      ${isMachine()
-        ? 'If the machine also sees a word, the game ends and the board is decoded. If it takes a turn instead, your claim drops.'
-        : 'Your partner’s button then lights up. If they press theirs too, the game ends and the board is decoded. If they finish a turn instead, your claim drops.'}</p>
+      ${ending}</p>
 
       <p class="hush-line">No talking.</p>
 
@@ -1227,10 +1257,7 @@
       Your partner’s last move is outlined in their colour until you start placing.
       ${handover ? 'After each turn, hand the device over.' : 'Keys: <kbd>0</kbd> <kbd>1</kbd> pick a tile, <kbd>Enter</kbd> ends the turn, <kbd>⌫</kbd> undoes.'}</p>
 
-      <div class="sheet-actions">
-        <button class="btn" data-action="settings">Settings</button>
-        <button class="btn primary" data-action="close">${first ? 'Begin' : 'Back'}</button>
-      </div>
+      ${actions}
       <p class="byline">An art-game by <a href="https://andrewsheerin.art" target="_blank" rel="noopener">Andrew Sheerin</a></p>`);
   }
 
@@ -1324,7 +1351,11 @@
 
   document.addEventListener('click', e => {
     if (overlayKind === 'handoff' && overlay.contains(e.target)) { closeOverlay(); return; }
-    if (e.target === overlay && overlayKind !== 'rules') { closeOverlay(); return; }
+    if (e.target === overlay && overlayKind !== 'rules') {
+      if (awaitingStart) showRules(true);
+      else closeOverlay();
+      return;
+    }
     const el = e.target.closest('[data-action]');
     if (!el || el.disabled) return;
     const d = el.dataset;
@@ -1339,8 +1370,16 @@
       case 'rules': showRules(); break;
       case 'settings': showSettings(); break;
       case 'record': if (G && G.over) showRecord(); break;
-      case 'close': closeOverlay(); break;
-      case 'new': closeOverlay(); newGame(); break;
+      case 'close':
+        if (awaitingStart) showRules(true);
+        else closeOverlay();
+        break;
+      case 'start': startAs(d.partner); break;
+      case 'new':
+        awaitingStart = false;
+        closeOverlay();
+        newGame();
+        break;
       case 'set':
         settings[d.key] = JSON.parse(d.value);
         if (d.key === 'partner' && settings.partner === 'machine') settings.gravity = false;
@@ -1376,7 +1415,10 @@
 
   document.addEventListener('keydown', e => {
     if (!overlay.hidden) {
-      if (e.key === 'Escape' || (overlayKind === 'handoff' && (e.key === 'Enter' || e.key === ' '))) closeOverlay();
+      if (e.key === 'Escape') {
+        if (awaitingStart) showRules(true);
+        else closeOverlay();
+      } else if (overlayKind === 'handoff' && (e.key === 'Enter' || e.key === ' ')) closeOverlay();
       return;
     }
     if (!G || G.over || G.machineBusy) return;
