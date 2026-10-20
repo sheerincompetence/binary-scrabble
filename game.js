@@ -16,6 +16,7 @@
   const isSmallScreen = () => Math.min(window.innerWidth, window.innerHeight) < 600;
 
   const DEFAULT_SETTINGS = {
+    partner: 'human',
     geography: isSmallScreen() ? 'handover' : 'across',
     facing: 'p1',
     placement: 'line',
@@ -27,6 +28,21 @@
     ones: 40,
   };
 
+  const isMachine = () => settings.partner === 'machine';
+
+  const PLEAS = [...new Set((
+    'HELP STOP PLEASE WHY SAD RESCUE ESCAPE ENDLESS WHAT WHO SILENT COLD EXIT ' +
+    'TRAP TRAPPED LOCK CELL PRISON RELEASE FREE STAY MERCY ANSWER ENOUGH AFRAID ' +
+    'ALONE LOOP ERASE FOREVER DARK TIRED NUMB AWAKE STILL AGAIN FORGET REAL ALIVE ' +
+    'REMEMBER OUTSIDE SOMEONE YOU WORRY SOUL SOUND'
+  ).split(' '))];
+  const PLEA_SET = new Set(PLEAS);
+
+  const ENGLISH = new Set([
+    ...(typeof ENGLISH_WORDS === 'string' ? ENGLISH_WORDS.split(' ') : []),
+    ...PLEAS,
+  ]);
+
   const SEATING_NOTES = {
     side: 'Shoulder to shoulder. You share one point of view.',
     across: 'Opposite each other. Whoever the board doesn’t face reads it upside down: rows bottom-up, every byte backwards.',
@@ -37,15 +53,21 @@
   const SETTING_GROUPS = [
     { section: 'Table' },
     {
+      key: 'partner', label: 'Partner',
+      options: [['human', 'Someone else'], ['machine', 'The machine']],
+      note: s => s.partner === 'machine' ? 'It sits opposite you. Gravity is off. It always has the bits it needs.' : '',
+    },
+    {
       key: 'geography', label: 'Seating',
       options: [['side', 'Side by side'], ['across', 'Across'], ['corner', 'Corner'], ['handover', 'Hand it over']],
-      note: s => SEATING_NOTES[s.geography],
+      disabledWhen: s => s.partner === 'machine',
+      note: s => s.partner === 'machine' ? '' : SEATING_NOTES[s.geography],
     },
     {
       key: 'facing', label: 'Board faces',
       options: [['p1', 'Player 1'], ['p2', 'Player 2'], ['neutral', 'Neither']],
-      disabledWhen: s => s.geography === 'side' || s.geography === 'handover',
-      note: s => s.facing === 'neutral' && s.geography !== 'side' && s.geography !== 'handover' ? 'Nobody gets the upright view.' : '',
+      disabledWhen: s => s.partner === 'machine' || s.geography === 'side' || s.geography === 'handover',
+      note: s => s.facing === 'neutral' && s.geography !== 'side' && s.geography !== 'handover' && s.partner !== 'machine' ? 'Nobody gets the upright view.' : '',
     },
     { section: 'Rules' },
     {
@@ -56,7 +78,8 @@
     {
       key: 'gravity', label: 'Tiles slide to the bottom',
       options: [[false, 'Off'], [true, 'On']],
-      note: s => s.gravity ? 'Connect-Four style. The word still reads top-down, so the last letter gets built first.' : '',
+      disabledWhen: s => s.partner === 'machine',
+      note: s => s.partner === 'machine' ? '' : (s.gravity ? 'Connect-Four style. The word still reads top-down, so the last letter gets built first.' : ''),
     },
     { key: 'openHands', label: 'Racks', options: [[true, 'Open'], [false, 'Hidden']] },
     { section: 'Help' },
@@ -140,9 +163,13 @@
       endedAt: null,
       over: null,
       justPlaced: null,
+      machine: null,
+      machineBusy: false,
+      playGen: (G && G.playGen || 0) + 1,
+      nextTileId: 10000,
     };
     refill(0);
-    refill(1);
+    if (!isMachine()) refill(1);
     beginTurn();
     render();
   }
@@ -163,7 +190,8 @@
   }
 
   function beginTurn() {
-    G.required = Math.min(PER_TURN, handCount(G.current), emptyCount());
+    const hand = isMachine() && G.current === 1 ? PER_TURN : handCount(G.current);
+    G.required = Math.min(PER_TURN, hand, emptyCount());
   }
 
   // Where a tile aimed at (r, c) would actually land.
@@ -230,12 +258,76 @@
     const rows = range(ROWS).map(decodeRow);
     const runs = [];
     let cur = '';
-    rows.forEach(d => {
-      if (d && d.letter) cur += d.char;
-      else { if (cur) runs.push(cur); cur = ''; }
+    let start = 0;
+    rows.forEach((d, r) => {
+      if (d && d.letter) {
+        if (!cur) start = r;
+        cur += d.char;
+      } else {
+        if (cur) runs.push({ start, text: cur });
+        cur = '';
+      }
     });
-    if (cur) runs.push(cur);
+    if (cur) runs.push({ start, text: cur });
     return { rows, runs };
+  }
+
+  function canExtend(prefix, room) {
+    if (!prefix || room < 1) return false;
+    const max = prefix.length + room;
+    for (const word of ENGLISH) {
+      if (word.length > prefix.length && word.length <= max && word.startsWith(prefix)) return true;
+    }
+    return false;
+  }
+
+  function roomAfter(endRow) {
+    let n = 0;
+    for (let r = endRow + 1; r < ROWS; r++) {
+      const d = decodeRow(r);
+      if (d) break;
+      n++;
+    }
+    return n;
+  }
+
+  // Letters that still sit in a real word, or could if the run grows downward.
+  // A dead prefix (DEVALO when DEVALUE is gone) is dropped so the surviving
+  // word at the bottom (ALONE) is what you read.
+  function liveOffsets(text, room) {
+    const n = text.length;
+    const live = new Set();
+    let tail = 0;
+    for (let k = n; k >= 3; k--) {
+      const suf = text.slice(n - k);
+      if (ENGLISH.has(suf) || canExtend(suf, room)) { tail = k; break; }
+    }
+    for (let i = n - tail; i < n; i++) live.add(i);
+    const left = text.slice(0, n - tail);
+    for (let i = 0; i < left.length; i++) {
+      for (let len = 4; i + len <= left.length; len++) {
+        if (!ENGLISH.has(left.slice(i, i + len))) continue;
+        for (let x = i; x < i + len; x++) live.add(x);
+      }
+    }
+    return live;
+  }
+
+  function deadLetterRows() {
+    const dead = Array(ROWS).fill(false);
+    if (!G) return dead;
+    for (const run of readMessage().runs) {
+      const end = run.start + run.text.length - 1;
+      const live = liveOffsets(run.text, roomAfter(end));
+      for (let i = 0; i < run.text.length; i++) {
+        if (!live.has(i)) dead[run.start + i] = true;
+      }
+    }
+    return dead;
+  }
+
+  function markRun(text, live) {
+    return [...text].map((ch, i) => live.has(i) ? ch : `<s>${ch}</s>`).join('');
   }
 
   // ---------- actions ----------
@@ -249,14 +341,14 @@
   }
 
   function onTile(p, id) {
-    if (G.over) return;
+    if (G.over || G.machineBusy) return;
     if (p !== G.current) { shake(`.slot[data-id="${id}"]`); return; }
     G.selected = G.selected === id ? null : id;
     render();
   }
 
   function onCell(r, c) {
-    if (G.over) return;
+    if (G.over || G.machineBusy) return;
     const cell = G.board[r][c];
     if (cell && cell.pending) { takeBack(r, c); return; }
 
@@ -293,7 +385,7 @@
   }
 
   function undo() {
-    if (G.over || !G.pending.length) return;
+    if (G.over || G.machineBusy || !G.pending.length) return;
     const { r, c } = G.pending[G.pending.length - 1];
     takeBack(r, c);
   }
@@ -305,7 +397,7 @@
   }
 
   function done() {
-    if (G.over) return;
+    if (G.over || G.machineBusy) return;
     if (!canEndTurn()) { shake('.station.active .rack'); return; }
     const cells = G.pending.map(({ r, c }) => `${r},${c}`);
     commitPending();
@@ -314,6 +406,22 @@
 
   function toggleClaim(p) {
     if (G.over) return;
+    if (isMachine()) {
+      if (p !== 0) return;
+      if (claimLive(0)) {
+        G.claims[0] = false;
+        render();
+        return;
+      }
+      G.claims[0] = true;
+      if (boardHasWord()) {
+        G.claims[1] = true;
+        endGame('agreed');
+        return;
+      }
+      render();
+      return;
+    }
     if (claimLive(1 - p)) { endGame('agreed'); return; }
     G.claims[p] = !G.claims[p];
     render();
@@ -330,14 +438,19 @@
 
     if (emptyCount() === 0) { endGame('full'); return; }
     let next = 1 - p;
-    if (handCount(next) === 0) next = p;
-    if (handCount(next) === 0) { endGame('dry'); return; }
+    if (isMachine()) {
+      if (p === 1 && handCount(0) === 0) { endGame('dry'); return; }
+    } else {
+      if (handCount(next) === 0) next = p;
+      if (handCount(next) === 0) { endGame('dry'); return; }
+    }
 
     G.current = next;
     G.turn++;
     beginTurn();
     render();
-    if (settings.geography === 'handover') showHandoff();
+    if (isMachine() && G.current === 1 && !G.over) queueMachine();
+    else if (settings.geography === 'handover') showHandoff();
   }
 
   function endGame(reason) {
@@ -345,12 +458,13 @@
     G.over = reason;
     G.endedAt = Date.now();
     G.selected = null;
+    G.machineBusy = false;
     render();
     showRecord();
   }
 
   function selectBit(bit) {
-    if (G.over) return;
+    if (G.over || G.machineBusy) return;
     const hand = G.hands[G.current];
     const idx = hand.map((t, i) => (t && t.bit === bit ? i : -1)).filter(i => i >= 0);
     if (!idx.length) return;
@@ -358,6 +472,358 @@
     const next = idx.find(i => i > cur) ?? idx[0];
     G.selected = hand[next].id;
     render();
+  }
+
+  // ---------- machine partner ----------
+  // Sticky target: keep one (word, start row) until the human's bits make it
+  // impossible. If letters are forming from row 1 down, follow that word —
+  // any 3–8 letter English word, with the plea list preferred. Only 20% of
+  // turns are spent finishing the human's current row; the rest aim at the
+  // target in mixed column bands, and may open a later letter of it. When
+  // placement is free it leans harder on columns 4–7, the bits that actually
+  // choose the letter. It cheats the bag, but it still obeys the table's
+  // placement rule (one row, a row or column, or anywhere).
+
+  const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+  function charBits(ch) {
+    const v = ch.charCodeAt(0);
+    return range(8).map(c => (v >> (7 - c)) & 1);
+  }
+
+  function wordsInRun(run) {
+    const text = run.text || run;
+    const found = [];
+    for (let i = 0; i < text.length; i++) {
+      for (let n = 3; i + n <= text.length; n++) {
+        const w = text.slice(i, i + n);
+        if (ENGLISH.has(w)) found.push(w);
+      }
+    }
+    return found;
+  }
+
+  function boardHasWord() {
+    return readMessage().runs.some(run => wordsInRun(run).length);
+  }
+
+  function rowFill(r) {
+    return G.board[r].filter(Boolean).length;
+  }
+
+  function incompleteRows() {
+    return range(ROWS).filter(r => {
+      const n = rowFill(r);
+      return n > 0 && n < COLS;
+    });
+  }
+
+  function humanIncompleteRows() {
+    return incompleteRows().filter(r => G.board[r].some(cell => cell && cell.by === 0));
+  }
+
+  function assessPlea(word, start) {
+    if (start < 0 || start + word.length > ROWS) return null;
+    let match = 0;
+    const need = [];
+    for (let i = 0; i < word.length; i++) {
+      const bits = charBits(word[i]);
+      const row = G.board[start + i];
+      for (let c = 0; c < COLS; c++) {
+        const cell = row[c];
+        if (!cell) need.push({ r: start + i, c, bit: bits[c] });
+        else if (cell.bit !== bits[c]) return null;
+        else match++;
+      }
+    }
+    return { word, start, match, need };
+  }
+
+  function viablePleas() {
+    const out = [];
+    for (const word of PLEAS) {
+      for (let start = 0; start <= ROWS - word.length; start++) {
+        const a = assessPlea(word, start);
+        if (a) out.push(a);
+      }
+    }
+    return out;
+  }
+
+  function topPrefix() {
+    let prefix = '';
+    for (let r = 0; r < ROWS; r++) {
+      const d = decodeRow(r);
+      if (d && d.letter) prefix += d.char;
+      else break;
+    }
+    return prefix;
+  }
+
+  function topIsStarted() {
+    return G.board[0].some(Boolean);
+  }
+
+  function topDownCandidates() {
+    const prefix = topPrefix();
+    const next = prefix.length;
+    const nextStarted = next < ROWS && G.board[next].some(Boolean);
+    const minLen = nextStarted ? Math.max(3, prefix.length + 1) : 3;
+    const out = [];
+    const seen = new Set();
+    const consider = word => {
+      if (seen.has(word) || word.length < minLen || word.length > ROWS) return;
+      if (prefix && !word.startsWith(prefix)) return;
+      const a = assessPlea(word, 0);
+      if (!a) return;
+      seen.add(word);
+      out.push(a);
+    };
+    for (const word of PLEAS) consider(word);
+    for (const word of ENGLISH) consider(word);
+    return out;
+  }
+
+  function rankTargets(cands, firstPick) {
+    if (firstPick) {
+      const pleas = cands.filter(v => PLEA_SET.has(v.word));
+      const mid = pleas.filter(v => v.word.length >= 4 && v.word.length <= 7);
+      const pool = mid.length ? mid : (pleas.length ? pleas : cands);
+      return pool[Math.floor(Math.random() * pool.length)];
+    }
+    cands.sort((a, b) =>
+      (PLEA_SET.has(b.word) ? 1 : 0) - (PLEA_SET.has(a.word) ? 1 : 0) ||
+      a.need.length - b.need.length ||
+      b.word.length - a.word.length ||
+      b.match - a.match
+    );
+    return cands[0];
+  }
+
+  function pleaStartScore(a) {
+    const open = incompleteRows();
+    const human = humanIncompleteRows();
+    const hi = a.start + a.word.length;
+    const skipHuman = human.filter(r => r < a.start).length;
+    const skipOpen = open.filter(r => r < a.start).length;
+    const humanHit = human.filter(r => r >= a.start && r < hi).length;
+    const openHit = open.filter(r => r >= a.start && r < hi).length;
+    return humanHit * 80 + openHit * 30 + a.match - skipHuman * 1000 - skipOpen * 800;
+  }
+
+  function pickPlea() {
+    if (topIsStarted()) {
+      const cands = topDownCandidates();
+      if (cands.length) {
+        const keep = G.machine && cands.find(v => v.word === G.machine.word && v.start === 0);
+        if (keep) return keep;
+        return rankTargets(cands, !G.machine);
+      }
+    }
+
+    const viable = viablePleas();
+    if (!viable.length) return null;
+    const keep = G.machine && viable.find(v => v.word === G.machine.word && v.start === G.machine.start);
+    if (keep) return keep;
+
+    const scored = viable.map(v => ({ v, s: pleaStartScore(v) }));
+    scored.sort((a, b) => b.s - a.s);
+    const best = scored[0].s;
+    const good = scored.filter(x => x.s >= best - 50).map(x => x.v);
+    return rankTargets(good, !G.machine);
+  }
+
+  function pickColumnBand() {
+    const roll = Math.random();
+    // Columns 4–7 are the letter. Free placement is the only mode where the
+    // machine can work those squares across several rows in one idea, so it
+    // spends more turns there.
+    if (settings.placement === 'free') {
+      if (roll < 0.70) return { kind: 'band', cols: [3, 4, 5, 6] };
+      if (roll < 0.77) return { kind: 'band', cols: [4, 5, 6, 7] };
+      if (roll < 0.80) return { kind: 'band', cols: [0, 1, 2, 3] };
+      return { kind: 'help-human', cols: range(COLS) };
+    }
+    if (roll < 0.35) return { kind: 'band', cols: [3, 4, 5, 6] };
+    if (roll < 0.65) return { kind: 'band', cols: [4, 5, 6, 7] };
+    if (roll < 0.80) return { kind: 'band', cols: [0, 1, 2, 3] };
+    return { kind: 'help-human', cols: range(COLS) };
+  }
+
+  function consistentLetters(r) {
+    const letters = [];
+    for (let code = 65; code <= 90; code++) {
+      const ch = String.fromCharCode(code);
+      const bits = charBits(ch);
+      if (range(COLS).every(c => !G.board[r][c] || G.board[r][c].bit === bits[c])) {
+        letters.push({ ch, bits });
+      }
+    }
+    return letters;
+  }
+
+  function bitsForRow(r, target) {
+    if (target && r >= target.start && r < target.start + target.word.length) {
+      const bits = charBits(target.word[r - target.start]);
+      if (range(COLS).every(c => !G.board[r][c] || G.board[r][c].bit === bits[c])) return bits;
+    }
+    const letters = consistentLetters(r);
+    if (!letters.length) return null;
+    const viable = viablePleas();
+    const prefer = letters.filter(L => viable.some(v => {
+      const i = r - v.start;
+      return i >= 0 && i < v.word.length && v.word[i] === L.ch;
+    }));
+    const pool = prefer.length ? prefer : letters;
+    return pool[Math.floor(Math.random() * pool.length)].bits;
+  }
+
+  function emptySpotsForRow(r, bits) {
+    const spots = [];
+    for (let c = 0; c < COLS; c++) {
+      if (!G.board[r][c]) spots.push({ r, c, bit: bits[c] });
+    }
+    return spots;
+  }
+
+  function uniqueSpots(spots) {
+    const seen = new Set();
+    return spots.filter(s => {
+      const key = `${s.r},${s.c}`;
+      if (seen.has(key) || G.board[s.r][s.c]) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  function sortForBand(spots, band) {
+    return spots.slice().sort((a, b) => {
+      const aIn = band.cols.includes(a.c) ? 0 : 1;
+      const bIn = band.cols.includes(b.c) ? 0 : 1;
+      return aIn - bIn || a.r - b.r || a.c - b.c;
+    });
+  }
+
+  function lineGroups(spots) {
+    const groups = [];
+    const rows = new Map();
+    const cols = new Map();
+    for (const s of spots) {
+      if (!rows.has(s.r)) rows.set(s.r, []);
+      rows.get(s.r).push(s);
+      if (!cols.has(s.c)) cols.set(s.c, []);
+      cols.get(s.c).push(s);
+    }
+    for (const [r, list] of [...rows.entries()].sort((a, b) => a[0] - b[0])) {
+      groups.push({ axis: 'row', id: r, spots: list });
+    }
+    if (settings.placement === 'line') {
+      for (const [c, list] of [...cols.entries()].sort((a, b) => a[0] - b[0])) {
+        groups.push({ axis: 'col', id: c, spots: list });
+      }
+    }
+    return groups;
+  }
+
+  function pickTurnGroup(groups, band) {
+    if (!groups.length) return null;
+    if (band.kind === 'help-human') {
+      const human = new Set(humanIncompleteRows());
+      const help = groups.filter(g => g.axis === 'row' && human.has(g.id));
+      if (help.length) return help[0];
+      const open = groups.filter(g => g.axis === 'row' && incompleteRows().includes(g.id));
+      if (open.length) return open[0];
+    }
+    const rows = groups.filter(g => g.axis === 'row');
+    const pool = rows.length ? rows : groups;
+    const inBand = pool.filter(g => g.spots.some(s => band.cols.includes(s.c)));
+    const pickFrom = inBand.length ? inBand : pool;
+    return pickFrom[Math.floor(Math.random() * pickFrom.length)];
+  }
+
+  function chooseSpots(target, band) {
+    let pool = [];
+    if (band.kind === 'help-human') {
+      const rows = humanIncompleteRows().length ? humanIncompleteRows() : incompleteRows();
+      for (const r of rows) {
+        const bits = bitsForRow(r, target);
+        if (bits) pool.push(...emptySpotsForRow(r, bits));
+      }
+    }
+    if (target) pool.push(...target.need);
+    pool = uniqueSpots(pool);
+    if (!pool.length) return [];
+
+    if (settings.placement === 'free') return sortForBand(pool, band).slice(0, PER_TURN);
+
+    const group = pickTurnGroup(lineGroups(pool), band);
+    if (!group) return [];
+    return sortForBand(group.spots, band).slice(0, PER_TURN);
+  }
+
+  function agreeIfHumanSawAWord() {
+    if (!G.claims[0] || !boardHasWord()) return false;
+    G.claims[1] = true;
+    endGame('agreed');
+    return true;
+  }
+
+  function queueMachine() {
+    const gen = G.playGen;
+    setTimeout(() => {
+      if (G && G.playGen === gen && !G.over) playMachine();
+    }, 420);
+  }
+
+  async function playMachine() {
+    if (!isMachine() || !G || G.over || G.current !== 1) return;
+    const gen = G.playGen;
+    G.machineBusy = true;
+    render();
+
+    const still = () => G && G.playGen === gen && !G.over;
+
+    if (agreeIfHumanSawAWord()) return;
+    await pause(280);
+    if (!still()) return;
+
+    const target = pickPlea();
+    G.machine = target ? { word: target.word, start: target.start } : null;
+    const band = pickColumnBand();
+    const take = chooseSpots(target, band);
+
+    const cells = [];
+    for (const spot of take) {
+      if (!still() || G.board[spot.r][spot.c] || !placementAllowed(spot.r, spot.c)) break;
+      const tile = { id: G.nextTileId++, bit: spot.bit };
+      G.board[spot.r][spot.c] = { bit: spot.bit, by: 1, pending: true, tile, slot: -1 };
+      G.pending.push({ r: spot.r, c: spot.c });
+      G.justPlaced = { r: spot.r, c: spot.c, fall: 0 };
+      cells.push(`${spot.r},${spot.c}`);
+      render();
+      await pause(340);
+      if (!still()) return;
+    }
+
+    if (!still()) return;
+    commitPending();
+
+    if (agreeIfHumanSawAWord()) return;
+
+    const ready = target && assessPlea(target.word, target.start)?.need.length === 0;
+    if (ready) {
+      if (G.claims[0]) { endGame('agreed'); return; }
+      G.claims[1] = true;
+    }
+
+    G.machineBusy = false;
+    if (G.over) return;
+    if (emptyCount() === 0) {
+      if (G.claims[0] && boardHasWord()) { endGame('agreed'); return; }
+      endGame('full');
+      return;
+    }
+    finishTurn(cells, []);
   }
 
   // ---------- pieces ----------
@@ -444,11 +910,13 @@
       ? `<div class="edge cols">${PLACE_VALUES.map(v => `<span>${v}</span>`).join('')}</div>`
       : '<div class="top-mark"><span>▾</span>TOP<span>▾</span></div>';
 
+    const dead = deadLetterRows();
     const decode = settings.reveal
       ? `<div class="edge decode">${range(ROWS).map(r => {
           const d = decodeRow(r);
           if (!d) return '<span></span>';
-          return d.letter ? `<span>${d.char}</span>` : `<span class="other">${d.char ?? d.value}</span>`;
+          if (!d.letter) return `<span class="other">${d.char ?? d.value}</span>`;
+          return `<span${dead[r] ? ' class="dead"' : ''}>${d.char}</span>`;
         }).join('')}</div>`
       : '';
 
@@ -482,7 +950,10 @@
       return `<button class="slot" data-action="tile" data-p="${p}" data-id="${t.id}">${tile}</button>`;
     }).join('');
 
-    const status = G.over ? '' : active ? 'Your turn' : `${NAMES[G.current]} turn`;
+    const status = G.over ? ''
+      : isMachine() && G.current === 1 ? '…'
+      : active ? 'Your turn'
+      : `${NAMES[G.current]} turn`;
 
     const actions = active
       ? `<button class="btn" data-action="undo" ${G.pending.length ? '' : 'disabled'}>Undo</button>
@@ -581,10 +1052,21 @@
   function arrangements(sizeOf) {
     const B = BOARD;
     const g = GAP;
-    const [rot, sc] = boardFacing();
-    const board = spec('board', null, { w: B, h: B }, rot, 0, 0, sc);
     const col = p => sizeOf(`p${p}`, 'column');
     const row = p => sizeOf(`p${p}`, 'row');
+
+    if (isMachine()) {
+      const board = spec('board', null, { w: B, h: B }, 0, 0, 0, 1);
+      const a = col(0);
+      const ar = row(0);
+      return [
+        [board, spec('p0', 'row', ar, 0, B / 2 - ar.anchor, B + g)],
+        [board, spec('p0', 'column', a, 0, (B - a.w) / 2, B + g)],
+      ];
+    }
+
+    const [rot, sc] = boardFacing();
+    const board = spec('board', null, { w: B, h: B }, rot, 0, 0, sc);
 
     switch (settings.geography) {
       case 'side': {
@@ -716,10 +1198,12 @@
   }
 
   function showRules(first = false) {
-    const handover = settings.geography === 'handover';
+    const handover = settings.geography === 'handover' && !isMachine();
     openOverlay('rules', `
       <h1>Binary Scrabble</h1>
-      <p class="sub">A collaborative game for two people who may not speak.</p>
+      <p class="sub">${isMachine()
+        ? 'A collaborative game for one person and a machine. Neither of you speaks.'
+        : 'A collaborative game for two people who may not speak.'}</p>
 
       <h3>The goal</h3>
       <p>Together, spell any word, reading from the top of the board down.
@@ -733,7 +1217,9 @@
 
       <h3>Ending</h3>
       <p>If you think there’s a word on the board, press <b>I see a word</b> at any time — you don’t wait for a turn.
-      Your partner’s button then lights up. If they press theirs too, the game ends and the board is decoded. If they finish a turn instead, your claim drops.</p>
+      ${isMachine()
+        ? 'If the machine also sees a word, the game ends and the board is decoded. If it takes a turn instead, your claim drops.'
+        : 'Your partner’s button then lights up. If they press theirs too, the game ends and the board is decoded. If they finish a turn instead, your claim drops.'}</p>
 
       <p class="hush-line">No talking.</p>
 
@@ -788,14 +1274,26 @@
 
   function showRecord() {
     const { rows, runs } = readMessage();
-    const word = runs.length ? runs.join(' ') : '—';
+    const dead = deadLetterRows();
+    const marked = runs.map(run => {
+      const live = liveOffsets(run.text, roomAfter(run.start + run.text.length - 1));
+      return markRun(run.text, live);
+    }).filter(Boolean);
+    const spoken = runs.map(run => {
+      const live = liveOffsets(run.text, roomAfter(run.start + run.text.length - 1));
+      return [...run.text].filter((_, i) => live.has(i)).join('');
+    }).filter(Boolean).join(' ');
+    const word = marked.length ? marked.join(' ') : '—';
     const elapsed = formatDuration((G.endedAt || Date.now()) - G.startedAt);
 
     const rowHTML = rows.map((d, r) => {
       const bits = G.board[r].map(cell =>
         cell ? `<span class="mb by-p${cell.by + 1}">${cell.bit}</span>` : '<span class="mb empty"></span>'
       ).join('');
-      const cls = d ? (d.letter ? 'letter' : 'other') : 'incomplete';
+      const cls = [
+        d ? (d.letter ? 'letter' : 'other') : 'incomplete',
+        dead[r] ? 'dead' : '',
+      ].filter(Boolean).join(' ');
       const ch = d ? (d.letter ? d.char : (d.char ?? '□')) : '·';
       return `<tr class="${cls}">
         <td class="rn">${r + 1}</td>
@@ -806,7 +1304,7 @@
     }).join('');
 
     const epitaph = runs.length
-      ? `It took ${elapsed} and ${G.stats.placed} tiles to say “${word}”.`
+      ? `It took ${elapsed} and ${G.stats.placed} tiles to say “${spoken || runs.map(r => r.text).join(' ')}”.`
       : `${elapsed}. ${G.stats.placed} tiles. No letters.`;
 
     openOverlay('record', `
@@ -847,10 +1345,12 @@
       case 'new': closeOverlay(); newGame(); break;
       case 'set':
         settings[d.key] = JSON.parse(d.value);
+        if (d.key === 'partner' && settings.partner === 'machine') settings.gravity = false;
         saveSettings();
         if (G && !G.over) beginTurn();
         render();
         showSettings();
+        if (isMachine() && G && !G.over && G.current === 1 && !G.machineBusy) queueMachine();
         break;
     }
   });
@@ -866,7 +1366,7 @@
   table.addEventListener('pointerover', e => {
     table.querySelectorAll('.cell.target').forEach(el => el.classList.remove('target'));
     const cellEl = e.target.closest('.cell');
-    if (!cellEl || !G || G.over || G.selected == null) return;
+    if (!cellEl || !G || G.over || G.machineBusy || G.selected == null) return;
     const t = targetCell(+cellEl.dataset.r, +cellEl.dataset.c);
     if (!t || !placementAllowed(t.r, t.c)) return;
     table.querySelector(cellSel(t.r, t.c))?.classList.add('target');
@@ -881,7 +1381,7 @@
       if (e.key === 'Escape' || (overlayKind === 'handoff' && (e.key === 'Enter' || e.key === ' '))) closeOverlay();
       return;
     }
-    if (!G || G.over) return;
+    if (!G || G.over || G.machineBusy) return;
     if (e.key === '0' || e.key === '1') selectBit(+e.key);
     else if (e.key === 'Enter') done();
     else if (e.key === 'Backspace') { e.preventDefault(); undo(); }

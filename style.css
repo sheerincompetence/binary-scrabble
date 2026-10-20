@@ -115,6 +115,7 @@ button { font: inherit; color: inherit; touch-action: manipulation; }
 .edge.cols   { top: 0; left: 31px; height: 31px; grid-template-columns: repeat(8, 52px); font-size: 11px; }
 .edge.decode { right: 0; top: 31px; width: 31px; grid-template-rows: repeat(8, 52px); font-size: 17px; color: var(--amber); }
 .edge.decode .other { color: #8d8576; font-size: 12px; }
+.edge.decode .dead { color: #8d8576; text-decoration: line-through; opacity: .45; }
 
 .top-mark,
 .board-foot {
@@ -683,6 +684,11 @@ button { font: inherit; color: inherit; touch-action: manipulation; }
   letter-spacing: .14em;
   word-break: break-word;
 }
+.record .word s {
+  color: #c4bba8;
+  text-decoration: line-through;
+  font-weight: 400;
+}
 
 .record .epitaph { margin: 0 0 20px; color: var(--ink-soft); }
 
@@ -693,6 +699,12 @@ button { font: inherit; color: inherit; touch-action: manipulation; }
 .record td.ch  { width: 44px; text-align: center; font: 600 20px/1 var(--sans); }
 .record tr.other td.ch { color: #a39b8b; font-size: 14px; }
 .record tr.incomplete td.ch { color: #c9c0ad; }
+.record tr.dead { opacity: .4; }
+.record tr.dead td.ch {
+  color: #a39b8b;
+  text-decoration: line-through;
+  text-decoration-thickness: 2px;
+}
 
 .bits { display: flex; gap: 3px; }
 
