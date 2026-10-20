@@ -10,16 +10,14 @@
   const PLACE_VALUES = [128, 64, 32, 16, 8, 4, 2, 1];
   const EXAMPLE_BITS = [0, 0, 1, 0, 1, 0, 1, 0];
   const NAMES = ['Player 1', 'Player 2'];
-  const STORAGE_KEY = 'binary-scrabble/settings/v1';
+  const STORAGE_KEY = 'binary-scrabble/settings/v2';
   const LAST_FADE_MS = 900;
-
-  const isSmallScreen = () => Math.min(window.innerWidth, window.innerHeight) < 600;
 
   const DEFAULT_SETTINGS = {
     partner: 'human',
-    geography: isSmallScreen() ? 'handover' : 'across',
+    geography: 'across',
     facing: 'p1',
-    placement: 'line',
+    placement: 'free',
     gravity: false,
     openHands: true,
     boardValues: false,
@@ -45,9 +43,9 @@
 
   const SEATING_NOTES = {
     side: 'Shoulder to shoulder. You share one point of view.',
-    across: 'Opposite each other. Whoever the board doesn’t face reads it upside down: rows bottom-up, every byte backwards.',
+    across: 'Opposite each other. Whoever the board doesn’t face reads it upside down.',
     corner: 'At a corner. One of you reads the board sideways, so rows look like columns.',
-    handover: 'One device, passed between you after every turn. Whoever holds it gets the upright view.',
+    handover: 'One device, passed between you after every turn.',
   };
 
   const SETTING_GROUPS = [
@@ -55,19 +53,13 @@
     {
       key: 'partner', label: 'Partner',
       options: [['human', 'Someone else'], ['machine', 'The machine']],
-      note: s => s.partner === 'machine' ? 'It sits opposite you. Gravity is off. It always has the bits it needs.' : '',
+      note: s => s.partner === 'machine' ? '' : '',
     },
     {
       key: 'geography', label: 'Seating',
       options: [['side', 'Side by side'], ['across', 'Across'], ['corner', 'Corner'], ['handover', 'Hand it over']],
       disabledWhen: s => s.partner === 'machine',
       note: s => s.partner === 'machine' ? '' : SEATING_NOTES[s.geography],
-    },
-    {
-      key: 'facing', label: 'Board faces',
-      options: [['p1', 'Player 1'], ['p2', 'Player 2'], ['neutral', 'Neither']],
-      disabledWhen: s => s.partner === 'machine' || s.geography === 'side' || s.geography === 'handover',
-      note: s => s.facing === 'neutral' && s.geography !== 'side' && s.geography !== 'handover' && s.partner !== 'machine' ? 'Nobody gets the upright view.' : '',
     },
     { section: 'Rules' },
     {
@@ -148,7 +140,7 @@
       board: range(ROWS).map(() => Array(COLS).fill(null)),
       bag,
       hands: [Array(HAND_SIZE).fill(null), Array(HAND_SIZE).fill(null)],
-      current: 0,
+      current: isMachine() && Math.random() < 0.5 ? 1 : 0,
       pending: [],
       selected: null,
       claims: [false, false],
@@ -172,6 +164,7 @@
     if (!isMachine()) refill(1);
     beginTurn();
     render();
+    maybeQueueMachine();
   }
 
   const handCount = p => G.hands[p].filter(Boolean).length;
@@ -449,8 +442,8 @@
     G.turn++;
     beginTurn();
     render();
-    if (isMachine() && G.current === 1 && !G.over) queueMachine();
-    else if (settings.geography === 'handover') showHandoff();
+    maybeQueueMachine();
+    if (!isMachine() && settings.geography === 'handover') showHandoff();
   }
 
   function endGame(reason) {
@@ -768,6 +761,11 @@
     return true;
   }
 
+  function maybeQueueMachine() {
+    if (!isMachine() || !G || G.over || G.current !== 1 || G.machineBusy || !overlay.hidden) return;
+    queueMachine();
+  }
+
   function queueMachine() {
     const gen = G.playGen;
     setTimeout(() => {
@@ -776,7 +774,7 @@
   }
 
   async function playMachine() {
-    if (!isMachine() || !G || G.over || G.current !== 1) return;
+    if (!isMachine() || !G || G.over || G.current !== 1 || !overlay.hidden) return;
     const gen = G.playGen;
     G.machineBusy = true;
     render();
@@ -1186,6 +1184,7 @@
     overlay.hidden = true;
     overlay.className = '';
     overlay.innerHTML = '';
+    maybeQueueMachine();
   }
 
   function showHandoff() {
@@ -1206,7 +1205,7 @@
         : 'A collaborative game for two people who may not speak.'}</p>
 
       <h3>The goal</h3>
-      <p>Together, spell any word, reading from the top of the board down.
+      <p>Together, spell any word, reading top to bottom.
       Each row is one capital letter, written as eight bits of ASCII. The tiles are only 0s and 1s.</p>
 
       <h3>Each turn</h3>
@@ -1216,7 +1215,7 @@
       </ul>
 
       <h3>Ending</h3>
-      <p>If you think there’s a word on the board, press <b>I see a word</b> at any time — you don’t wait for a turn.
+      <p>If you think there’s a word anywhere on the board, press <b>I see a word</b> at any time — you don’t wait for a turn.
       ${isMachine()
         ? 'If the machine also sees a word, the game ends and the board is decoded. If it takes a turn instead, your claim drops.'
         : 'Your partner’s button then lights up. If they press theirs too, the game ends and the board is decoded. If they finish a turn instead, your claim drops.'}</p>
@@ -1263,7 +1262,6 @@
 
     openOverlay('settings', `
       <h2>Settings</h2>
-      <p class="sub">Table and rule changes apply right away.</p>
       ${rows}
       ${bag}
       <div class="sheet-actions">
@@ -1350,7 +1348,7 @@
         if (G && !G.over) beginTurn();
         render();
         showSettings();
-        if (isMachine() && G && !G.over && G.current === 1 && !G.machineBusy) queueMachine();
+        maybeQueueMachine();
         break;
     }
   });
