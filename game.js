@@ -42,10 +42,10 @@
   ]);
 
   const SEATING_NOTES = {
-    side: 'Shoulder to shoulder. You share one point of view.',
+    side: 'Shoulder to shoulder, sharing one point of view.',
     across: 'Opposite each other. Whoever the board doesn’t face reads it upside down.',
     corner: 'At a corner. One of you reads the board sideways, so rows look like columns.',
-    handover: 'One device, passed between you after every turn.',
+    handover: 'One device, passed between you following each turn.',
   };
 
   const SETTING_GROUPS = [
@@ -61,11 +61,10 @@
       disabledWhen: s => s.partner === 'machine',
       note: s => s.partner === 'machine' ? '' : SEATING_NOTES[s.geography],
     },
-    { section: 'Rules' },
+    { section: 'Placement Rules' },
     {
       key: 'placement', label: 'A turn’s 4 tiles go',
-      options: [['row', 'In one row'], ['line', 'One row or column'], ['free', 'Anywhere']],
-      note: s => s.placement === 'line' ? 'Fill the last gap in a row or column and you may stop early.' : '',
+      options: [['row', 'In one row'], ['free', 'Anywhere']],
     },
     {
       key: 'gravity', label: 'Tiles slide to the bottom',
@@ -73,7 +72,11 @@
       disabledWhen: s => s.partner === 'machine',
       note: s => s.partner === 'machine' ? '' : (s.gravity ? 'Connect-Four style. The word still reads top-down, so the last letter gets built first.' : ''),
     },
-    { key: 'openHands', label: 'Racks', options: [[true, 'Open'], [false, 'Hidden']] },
+    {
+      key: 'openHands', label: 'Racks',
+      options: [[true, 'Open'], [false, 'Hidden']],
+      disabledWhen: s => s.partner === 'machine',
+    },
     { section: 'Help' },
     { key: 'boardValues', label: 'Column values on board', options: [[false, 'Hidden'], [true, 'Shown']] },
     { key: 'reveal', label: 'Decode rows on board', options: [[false, 'Off'], [true, 'On (cheat)']] },
@@ -115,6 +118,11 @@
     const s = { ...DEFAULT_SETTINGS };
     for (const key of Object.keys(s)) if (key in saved) s[key] = saved[key];
     if (!SEATING_NOTES[s.geography]) s.geography = DEFAULT_SETTINGS.geography;
+    if (s.placement !== 'row' && s.placement !== 'free') s.placement = DEFAULT_SETTINGS.placement;
+    if (s.partner === 'machine') {
+      s.gravity = false;
+      s.openHands = true;
+    }
     return s;
   }
 
@@ -1199,7 +1207,10 @@
 
   function startAs(partner) {
     settings.partner = partner;
-    if (partner === 'machine') settings.gravity = false;
+    if (partner === 'machine') {
+      settings.gravity = false;
+      settings.openHands = true;
+    }
     saveSettings();
     awaitingStart = false;
     closeOverlay();
@@ -1210,22 +1221,19 @@
     const machine = isMachine();
     const handover = settings.geography === 'handover' && !machine;
     const intro = first
-      ? 'A collaborative game for two people, or one person and a machine. Nobody speaks.'
+      ? 'A collaborative game of trying to spell a single word together in binary.'
       : machine
-        ? 'A collaborative game for one person and a machine. Neither of you speaks.'
-        : 'A collaborative game for two people who may not speak.';
+        ? 'A collaborative game between you and the machine, trying to spell a single word together in binary.'
+        : 'A collaborative game for two people, trying to spell a single word together in binary.';
     const ending = first
-      ? 'If your partner also sees a word, the game ends and the board is decoded. If they take a turn instead, your claim drops.'
+      ? 'If your partner also sees a word, the game ends and the board is decoded. If they take a turn instead, the game continues.'
       : machine
-        ? 'If the machine also sees a word, the game ends and the board is decoded. If it takes a turn instead, your claim drops.'
+        ? 'If the machine also sees a word, the game ends and the board is decoded. If it takes a turn instead, the game continues.'
         : 'Your partner’s button then lights up. If they press theirs too, the game ends and the board is decoded. If they finish a turn instead, your claim drops.';
     const actions = first
-      ? `<div class="sheet-actions start">
-          <button class="btn" data-action="settings">Settings</button>
-          <div class="sheet-start">
-            <button class="btn${machine ? '' : ' primary'}" data-action="start" data-partner="human">Two players</button>
-            <button class="btn${machine ? ' primary' : ''}" data-action="start" data-partner="machine">One player</button>
-          </div>
+      ? `<div class="sheet-actions">
+          <button class="btn${machine ? '' : ' primary'}" data-action="start" data-partner="human">Two players</button>
+          <button class="btn${machine ? ' primary' : ''}" data-action="start" data-partner="machine">One player</button>
         </div>`
       : `<div class="sheet-actions">
           <button class="btn" data-action="settings">Settings</button>
@@ -1237,8 +1245,7 @@
       <p class="sub">${intro}</p>
 
       <h3>The goal</h3>
-      <p>Together, spell any word, reading top to bottom.
-      Each row is one capital letter, written as eight bits of ASCII. The tiles are only 0s and 1s.</p>
+      <p>Together, spell a word in binary, reading top to bottom. Each letter is written as eight bits of ASCII, so each row is equal to one letter. Your tiles are just 1s and 0s. A reference sheet helps you read the board and plan your turn.</p>
 
       <h3>Each turn</h3>
       <ul>
@@ -1247,15 +1254,15 @@
       </ul>
 
       <h3>Ending</h3>
-      <p>If you think there’s a word anywhere on the board, press <b>I see a word</b> at any time — you don’t wait for a turn.
+      <p>If you think there’s a word anywhere on the board, press <b>I see a word</b> at any time.
       ${ending}</p>
 
-      <p class="hush-line">No talking.</p>
-
-      <h3>On this screen</h3>
+      <h3>Controls</h3>
       <p>Tap a tile in your rack, then a square. Tap a placed tile to take it back.
       Your partner’s last move is outlined in their colour until you start placing.
       ${handover ? 'After each turn, hand the device over.' : 'Keys: <kbd>0</kbd> <kbd>1</kbd> pick a tile, <kbd>Enter</kbd> ends the turn, <kbd>⌫</kbd> undoes.'}</p>
+
+      <p class="hush-line">No talking.</p>
 
       ${actions}
       <p class="byline">An art-game by <a href="https://andrewsheerin.art" target="_blank" rel="noopener">Andrew Sheerin</a></p>`);
@@ -1273,12 +1280,10 @@
       return `<div class="set-row"><div class="set-label">${g.label}${note}</div><div class="pills">${pills}</div></div>`;
     }).join('');
 
-    const total = settings.zeros + settings.ones;
     const bagChanged = G && !G.over && (settings.zeros !== G.bagSpec.zeros || settings.ones !== G.bagSpec.ones);
     const bag = `<h3>Bag</h3>
       <div class="set-row">
         <div class="set-label">Tiles in the bag
-          <div class="set-note">Capital letters are about 59% zeros. ${total} tiles total; the board holds 64.</div>
           ${bagChanged ? '<div class="set-note warn">This takes effect from the next game.</div>' : ''}
         </div>
         <div class="num-group">
@@ -1382,7 +1387,10 @@
         break;
       case 'set':
         settings[d.key] = JSON.parse(d.value);
-        if (d.key === 'partner' && settings.partner === 'machine') settings.gravity = false;
+        if (d.key === 'partner' && settings.partner === 'machine') {
+          settings.gravity = false;
+          settings.openHands = true;
+        }
         saveSettings();
         if (G && !G.over) beginTurn();
         render();

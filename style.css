@@ -587,7 +587,7 @@ button { font: inherit; color: inherit; touch-action: manipulation; }
 .sheet p, .sheet li { font-size: 15px; line-height: 1.55; color: #3a362f; }
 .sheet ul { padding-left: 18px; margin: 6px 0; }
 .sheet .sub { margin-top: 0; color: var(--ink-soft); font-size: 14px; }
-.sheet .hush-line { font: 600 13px/1 var(--sans); letter-spacing: .4em; text-transform: uppercase; margin: 22px 0 4px; }
+.sheet .hush-line { font: 600 13px/1 var(--sans); letter-spacing: .4em; text-transform: uppercase; margin: 42px 0 20px; }
 .sheet .byline { margin: 28px 0 0; text-align: center; font: 500 13px/1.4 var(--sans); color: var(--ink-soft); }
 .sheet .byline a { color: inherit; text-underline-offset: 3px; }
 .sheet kbd { font: 12px var(--mono); padding: 1px 5px; border: 1px solid #d6cdb9; border-radius: 4px; background: #fff; }
@@ -597,20 +597,6 @@ button { font: inherit; color: inherit; touch-action: manipulation; }
   justify-content: flex-end;
   gap: 8px;
   margin-top: 26px;
-}
-
-.sheet-actions.start {
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.sheet-start {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px;
 }
 
 .set-row {
